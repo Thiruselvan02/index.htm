@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Movement Analyzer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Chosen Palette: Calm Harmony (Light Gray background, White cards, Indigo accents) -->
+    <!-- Application Structure Plan: A dashboard layout that's revealed on a button click. The structure mirrors the original Streamlit app's flow: 1) KPIs, 2) Top 10 Chart, 3) 3-Column Insights, 4) Pairs Analysis, 5) Full Data Table. This is chosen for usability as it guides the user from a high-level overview (KPIs) to a deep-dive (full table) in a logical progression. The "Load Data" button acts as the single entry point to the analysis. -->
+    <!-- Visualization & Content Choices:
+        - Report Info: Total Revenue, Total Items, Unique Products -> Goal: Inform -> Viz: KPI Stat Cards (HTML/Tailwind) -> Interaction: None -> Justification: Quick, high-level summary.
+        - Report Info: Top 10 Products by Quantity -> Goal: Compare/Rank -> Viz: Horizontal Bar Chart (Chart.js/Canvas) -> Interaction: Hover Tooltip -> Justification: Best visual for ranked lists.
+        - Report Info: Fast/Slow/Frequent Movers -> Goal: Organize/Inform -> Viz: 3 HTML Tables -> Interaction: None -> Justification: Clear, scannable lists for detailed insights.
+        - Report Info: Frequently Bought Together -> Goal: Relationships -> Viz: HTML Table -> Interaction: None -> Justification: Direct display of co-purchase pairs and counts.
+        - Report Info: Full Product Stats -> Goal: Organize/Inform -> Viz: Full HTML Table -> Interaction: Vertical Scroll -> Justification: Provides full data transparency for deep dives.
+        -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 400px;
+            max-height: 500px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 500px;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-slate-900 p-4 sm:p-8">
+
+    <main class="container mx-auto max-w-7xl bg-white rounded-2xl shadow-xl p-6 sm:p-8 md:p-12">
+        
+        <header class="text-center mb-12">
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-4 text-center sm:text-left">
+                <div class="flex-shrink-0 bg-indigo-100 text-indigo-600 p-3 rounded-xl">
+                    <span class="text-4xl">📊</span>
+                </div>
+                <div>
+                    <h1 class="text-4xl font-bold text-indigo-700">Product Movement Analyzer</h1>
+                    <p class="mt-2 text-lg text-slate-600">
+                        Upload a sales file or load sample data to generate an interactive report.
+                    </p>
+                </div>
+            </div>
+        </header>
+
+        <hr class="mb-12 border-gray-200">
+
+        <div class="max-w-4xl mx-auto mb-12">
+            <div class="grid grid-cols-1 md:grid-cols-5 gap-6 md:gap-8 items-center bg-gray-50 p-6 rounded-lg border border-gray-200">
+                <div class="md:col-span-3">
+                    <h3 class="text-xl font-semibold text-slate-800 mb-3">Upload Your Sales Data</h3>
+                    <p class="text-sm text-slate-500 mb-2">Upload a .csv, .xls, or .xlsx file to analyze.</p>
+                    <p class="text-xs text-slate-500 mb-4 italic">Required columns: "productName", "price", "quantity".</p>
+                    <input type="file" id="file-uploader" class="block w-full text-sm text-slate-500
+                        file:mr-4 file:py-2 file:px-4
+                        file:rounded-lg file:border-0
+                        file:text-sm file:font-semibold
+                        file:bg-indigo-50 file:text-indigo-700
+                        hover:file:bg-indigo-100 transition-colors cursor-pointer"
+                        accept=".csv,.xlsx,.xls">
+                    <p id="file-error-message" class="text-red-600 text-sm mt-3 hidden"></p>
+                </div>
+                
+                <div class="md:col-span-2 text-center">
+                    <span class="text-sm text-slate-500 mb-4 block">Or use our sample data</span>
+                    <button id="load-data-btn" class="w-full bg-indigo-600 text-white font-semibold px-6 py-3 rounded-lg shadow-md hover:bg-indigo-700 transition-colors">
+                        Load Sample Data
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <p id="error-message" class="text-red-600 text-center mb-4 hidden"></p>
+
+        <div id="dashboard-container" class="hidden space-y-12">
+
+            <section id="sales-overview">
+                <h2 class="text-3xl font-semibold mb-6 pb-3 border-b border-gray-200">Sales Overview</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-white p-6 rounded-lg shadow-lg border border-gray-200">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-sm font-medium text-slate-500 uppercase tracking-wider">Total Revenue</h3>
+                            <span class="text-2xl text-indigo-400">💰</span>
+                        </div>
+                        <p id="total-revenue" class="text-4xl font-bold text-indigo-600 mt-2">$0.00</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow-lg border border-gray-200">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-sm font-medium text-slate-500 uppercase tracking-wider">Total Items Sold</h3>
+                            <span class="text-2xl text-indigo-400">📦</span>
+                        </div>
+                        <p id="total-items" class="text-4xl font-bold text-indigo-600 mt-2">0</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow-lg border border-gray-200">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-sm font-medium text-slate-500 uppercase tracking-wider">Unique Products Sold</h3>
+                            <span class="text-2xl text-indigo-400">🏷️</span>
+                        </div>
+                        <p id="unique-products" class="text-4xl font-bold text-indigo-600 mt-2">0</p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="top-10-products">
+                <h2 class="text-3xl font-semibold mb-6 pb-3 border-b border-gray-200">Top 10 Products by Quantity Sold</h2>
+                <div class="bg-white p-6 rounded-lg shadow-lg border border-gray-200">
+                    <div class="chart-container">
+                        <canvas id="top10Chart"></canvas>
+                    </div>
+                    <p class="text-center text-slate-500 mt-4">This chart shows the 10 most popular products based on the total number of units sold.</p>
+                </div>
+            </section>
+
+            <section id="product-movement">
+                <h2 class="text-3xl font-semibold mb-6 pb-3 border-b border-gray-200">Product Movement Insights</h2>
+                <p class="text-lg text-slate-600 mb-6">
+                    This section breaks down products by their sales velocity and frequency. "Fast-Moving" products sell the most units, while "Most Frequent" products appear in the most separate orders.
+                </p>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    
+                    <div class="bg-white p-6 rounded-lg shadow-lg border border-gray-200">
+                        <h3 class="text-xl font-semibold mb-4 text-slate-800">🚀 Fast-Moving (by Quantity)</h3>
+                        <div id="top-movers-table" class="overflow-x-auto"></div>
+                    </div>
+                    
+                    <div class="bg-white p-6 rounded-lg shadow-lg border border-gray-200">
+                        <h3 class="text-xl font-semibold mb-4 text-slate-800">👥 Most Frequent (by Orders)</h3>
+                        <div id="most-frequent-table" class="overflow-x-auto"></div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-lg shadow-lg border border-gray-200">
+                        <h3 class="text-xl font-semibold mb-4 text-slate-800">🐢 Slow-Moving (by Quantity)</h3>
+                        <div id="slow-movers-table" class="overflow-x-auto"></div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="customer-patterns">
+                <h2 class="text-3xl font-semibold mb-6 pb-3 border-b border-gray-200">Customer Pattern Analysis</h2>
+                <p class="text-lg text-slate-600 mb-6">
+                    This analysis looks at which items are purchased together in the same transaction. Understanding these patterns can help with product bundling, marketing, and store layout.
+                </p>
+                <div class="bg-white p-6 rounded-lg shadow-lg border border-gray-200">
+                    <h3 class="text-xl font-semibold mb-4 text-slate-800">🛒 Frequently Bought Together</h3>
+                    <div id="frequent-pairs-table" class="overflow-x-auto"></div>
+                </div>
+            </section>
+
+            <section id="full-report">
+                <h2 class="text-3xl font-semibold mb-6 pb-3 border-b border-gray-200">Full Product Performance Report</h2>
+                <p class="text-lg text-slate-600 mb-6">
+                    Here is the complete list of all products, aggregated to show their total performance across quantity sold, number of orders, and total revenue.
+                </p>
+                <div class="bg-white rounded-lg shadow-lg border border-gray-200 overflow-hidden">
+                    <div id="full-report-table" class="overflow-x-auto"></div>
+                </div>
+            </section>
+        </div>
+
+        <footer class="mt-12 text-center text-sm text-slate-500 border-t border-gray-200 pt-8">
+            <p>&copy; 2025 Product Movement Analyzer. A web application demo.</p>
+        </footer>
+
+    </main>
+
+    <script>
+        const SAMPLE_DATA = `transactionID,productName,category,price,quantity
+T-1001,Classic White Bread,Bakery,2.50,1
+T-1001,Whole Milk 1L,Dairy,1.20,1
+T-1001,Cheddar Cheese,Dairy,4.50,1
+T-1002,Apples (1kg),Produce,3.00,1
+T-1002,Potato Chips,Snacks,2.00,2
+T-1002,Cola 2L,Beverages,1.80,2
+T-1003,Ground Beef (500g),Meat,5.00,1
+T-1003,Canned Tomatoes,Pantry,1.00,3
+T-1004,Classic White Bread,Bakery,2.50,1
+T-1004,Whole Milk 1L,Dairy,1.20,1
+T-1005,Potato Chips,Snacks,2.00,1
+T-1005,Cola 2L,Beverages,1.80,1
+T-1006,Laundry Detergent,Household,8.00,1
+T-1007,Artisan Sourdough,Bakery,3.50,1
+T-1007,Cheddar Cheese,Dairy,4.50,1
+T-1008,Apples (1kg),Produce,3.00,2
+T-1009,Classic White Bread,Bakery,2.50,1
+T-1009,Shampoo,Personal Care,4.00,1
+`;
+
+        let top10ChartInstance = null;
+
+        function parseCSV(csvData) {
+            const lines = csvData.trim().split('\n');
+            const headers = lines[0].split(',').map(h => h.trim());
+            const data = [];
+
+            for (let i = 1; i < lines.length; i++) {
+                const values = lines[i].split(',');
+                const entry = {};
+                headers.forEach((header, index) => {
+                    const value = values[index] ? values[index].trim() : '';
+                    entry[header] = value;
+                });
+                data.push(entry);
+            }
+            return data;
+        }
+        
+        function validateData(data) {
+            const requiredHeaders = ['productName', 'price', 'quantity'];
+            if (!data || data.length === 0) {
+                throw new Error("No data found in file.");
+            }
+
+            const headers = Object.keys(data[0]);
+            const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+            if (missingHeaders.length > 0) {
+                throw new Error(`File is missing required header(s): ${missingHeaders.join(', ')}`);
+            }
+            
+            return data.map((item, index) => {
+                const line = index + 2;
+                if (!item.productName) {
+                    throw new Error(`Missing 'productName' on line ${line}.`);
+                }
+
+                const price = parseFloat(item.price);
+                if (isNaN(price) || price < 0) {
+                    throw new Error(`Invalid or missing 'price' on line ${line}. Must be a non-negative number.`);
+                }
+                
+                const quantity = parseFloat(item.quantity);
+                if (isNaN(quantity) || quantity < 0) {
+                     throw new Error(`Invalid or missing 'quantity' on line ${line}. Must be a non-negative number.`);
+                }
+
+                return {
+                    ...item,
+                    price: price,
+                    quantity: quantity,
+                    category: item.category || 'N/A'
+                };
+            });
+        }
+
+        function performAnalysis(data) {
+            let totalRevenue = 0;
+            let totalQuantity = 0;
+            const productStats = {};
+            const baskets = {};
+
+            data.forEach(item => {
+                const itemRevenue = item.price * item.quantity;
+                item.totalRevenue = itemRevenue;
+
+                totalRevenue += itemRevenue;
+                totalQuantity += item.quantity;
+
+                if (!productStats[item.productName]) {
+                    productStats[item.productName] = {
+                        category: item.category,
+                        totalQuantity: 0,
+                        frequency: 0,
+                        totalRevenue: 0,
+                    };
+                }
+                productStats[item.productName].totalQuantity += item.quantity;
+                productStats[item.productName].frequency += 1;
+                productStats[item.productName].totalRevenue += itemRevenue;
+
+                if (item.transactionID) {
+                    if (!baskets[item.transactionID]) {
+                        baskets[item.transactionID] = new Set();
+                    }
+                    baskets[item.transactionID].add(item.productName);
+                }
+            });
+
+            const productStatsArray = Object.keys(productStats).map(name => ({
+                productName: name,
+                ...productStats[name]
+            }));
+
+            const sortedByQuantity = [...productStatsArray].sort((a, b) => b.totalQuantity - a.totalQuantity);
+            const sortedByFrequency = [...productStatsArray].sort((a, b) => b.frequency - a.frequency);
+
+            const pairCounts = {};
+            Object.values(baskets).forEach(basket => {
+                if (basket.size >= 2) {
+                    const sortedBasket = Array.from(basket).sort();
+                    for (let i = 0; i < sortedBasket.length; i++) {
+                        for (let j = i + 1; j < sortedBasket.length; j++) {
+                            const pair = `${sortedBasket[i]} + ${sortedBasket[j]}`;
+                            pairCounts[pair] = (pairCounts[pair] || 0) + 1;
+                        }
+                    }
+                }
+            });
+
+            const frequentPairs = Object.keys(pairCounts)
+                .map(pair => ({ Pair: pair, Count: pairCounts[pair] }))
+                .sort((a, b) => b.Count - a.Count)
+                .slice(0, 10);
+
+            return {
+                totalRevenue: totalRevenue,
+                totalQuantity: totalQuantity,
+                totalUniqueProducts: productStatsArray.length,
+                allProducts: sortedByQuantity,
+                topMovers: sortedByQuantity.slice(0, 5),
+                slowMovers: sortedByQuantity.slice(-5).sort((a, b) => a.totalQuantity - b.totalQuantity),
+                mostFrequent: sortedByFrequency.slice(0, 5),
+                frequentPairs: frequentPairs,
+                hasBasketAnalysis: Object.keys(baskets).length > 0 && frequentPairs.length > 0
+            };
+        }
+
+        function formatCurrency(amount) {
+            return amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+        }
+
+        function formatNumber(num) {
+            return num.toLocaleString('en-US');
+        }
+
+        function createTable(data, headers, columnKeys) {
+            let table = '<table class="min-w-full divide-y divide-gray-200">';
+            table += '<thead class="bg-gray-50">';
+            table += '<tr>';
+            headers.forEach(header => {
+                table += `<th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">${header}</th>`;
+            });
+            table += '</tr></thead>';
+            table += '<tbody class="bg-white divide-y divide-gray-200">';
+            data.forEach(row => {
+                table += '<tr>';
+                columnKeys.forEach((key, index) => {
+                    let value = row[key];
+                    if (key === 'totalRevenue') {
+                        value = formatCurrency(value);
+                    } else if (key === 'totalQuantity' || key === 'frequency' || key === 'Count') {
+                        value = formatNumber(value);
+                    }
+                    table += `<td class="px-6 py-4 whitespace-nowrap text-sm ${index === 0 ? 'font-medium text-slate-900' : 'text-slate-500'}">${value}</td>`;
+                });
+                table += '</tr>';
+            });
+            table += '</tbody></table>';
+            
+            if (data.length === 0) {
+                return '<p class="text-slate-500 p-4">No data available for this analysis.</p>';
+            }
+            return table;
+        }
+
+        function displayDashboard(analysis) {
+            document.getElementById('total-revenue').textContent = formatCurrency(analysis.totalRevenue);
+            document.getElementById('total-items').textContent = formatNumber(analysis.totalQuantity);
+            document.getElementById('unique-products').textContent = formatNumber(analysis.totalUniqueProducts);
+
+            const top10 = analysis.allProducts.slice(0, 10).reverse();
+            renderTop10Chart(top10);
+
+            document.getElementById('top-movers-table').innerHTML = createTable(
+                analysis.topMovers,
+                ['Product', 'Quantity Sold'],
+                ['productName', 'totalQuantity']
+            );
+            document.getElementById('most-frequent-table').innerHTML = createTable(
+                analysis.mostFrequent,
+                ['Product', 'Orders'],
+                ['productName', 'frequency']
+            );
+            document.getElementById('slow-movers-table').innerHTML = createTable(
+                analysis.slowMovers,
+                ['Product', 'Quantity Sold'],
+                ['productName', 'totalQuantity']
+            );
+
+            if (analysis.hasBasketAnalysis) {
+                document.getElementById('frequent-pairs-table').innerHTML = createTable(
+                    analysis.frequentPairs,
+                    ['Product Pair', 'Count'],
+                    ['Pair', 'Count']
+                );
+            } else {
+                 document.getElementById('frequent-pairs-table').innerHTML = '<p class="text-slate-500 p-4">No common product pairs found. This analysis works best with more transaction data.</p>';
+            }
+
+            document.getElementById('full-report-table').innerHTML = createTable(
+                analysis.allProducts,
+                ['Product', 'Category', 'Quantity Sold', 'Orders', 'Total Revenue'],
+                ['productName', 'category', 'totalQuantity', 'frequency', 'totalRevenue']
+            );
+
+            document.getElementById('dashboard-container').classList.remove('hidden');
+        }
+
+        function renderTop10Chart(top10Data) {
+            const ctx = document.getElementById('top10Chart').getContext('2d');
+            
+            if (top10ChartInstance) {
+                top10ChartInstance.destroy();
+            }
+
+            const labels = top10Data.map(item => item.productName);
+            const data = top10Data.map(item => item.totalQuantity);
+
+            top10ChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Quantity Sold',
+                        data: data,
+                        backgroundColor: 'rgba(79, 70, 229, 0.8)',
+                        borderColor: 'rgba(79, 70, 229, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            backgroundColor: '#FFFFFF',
+                            titleColor: '#334155',
+                            bodyColor: '#334155',
+                            borderColor: '#e2e8f0',
+                            borderWidth: 1,
+                            callbacks: {
+                                label: function(context) {
+                                    return `Quantity: ${formatNumber(context.raw)}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            grid: {
+                                color: '#e2e8f0'
+                            },
+                            ticks: {
+                                color: '#64748b'
+                            }
+                        },
+                        y: {
+                            grid: {
+                                display: false
+                            },
+                            ticks: {
+                                color: '#334155',
+                                font: {
+                                    weight: '500'
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function showError(message, id = 'error-message') {
+            const errorEl = document.getElementById(id);
+            if (errorEl) {
+                errorEl.textContent = message;
+                errorEl.classList.remove('hidden');
+            }
+        }
+        
+        function clearError() {
+            document.getElementById('error-message').classList.add('hidden');
+            document.getElementById('file-error-message').classList.add('hidden');
+            document.getElementById('error-message').textContent = '';
+            document.getElementById('file-error-message').textContent = '';
+        }
+        
+        function runFullAnalysis(data) {
+            clearError();
+            try {
+                const validatedData = validateData(data);
+                const analysis = performAnalysis(validatedData);
+                displayDashboard(analysis);
+            } catch (err) {
+                showError(err.message);
+                document.getElementById('dashboard-container').classList.add('hidden');
+            }
+        }
+
+        document.getElementById('load-data-btn').addEventListener('click', () => {
+            const rawData = parseCSV(SAMPLE_DATA);
+            runFullAnalysis(rawData);
+        });
+        
+        document.getElementById('file-uploader').addEventListener('change', (event) => {
+            clearError();
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+
+            if (file.name.endsWith('.csv')) {
+                reader.onload = (e) => {
+                    try {
+                        const rawData = parseCSV(e.target.result);
+                        runFullAnalysis(rawData);
+                    } catch (err) {
+                        showError(err.message);
+                    }
+                };
+                reader.readAsText(file);
+            } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+                reader.onload = (e) => {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, {type: 'array'});
+                        const firstSheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[firstSheetName];
+                        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                        runFullAnalysis(jsonData);
+                    } catch (err) {
+                        showError(err.message);
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                showError('Unsupported file type. Please upload a .csv or .xlsx file.', 'file-error-message');
+            }
+            
+            event.target.value = null;
+        });
+    </script>
+
+</body>
+</html>
